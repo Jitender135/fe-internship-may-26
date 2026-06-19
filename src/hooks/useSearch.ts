@@ -1,8 +1,6 @@
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import type { Item } from '../types'
-
-// Uncomment this import when you are ready to wire up the search logic:
-// import { searchItems } from '../services/mockApi'
+import { searchItems } from '../services/mockApi'
 
 export interface UseSearchReturn {
   query: string
@@ -18,32 +16,42 @@ export function useSearch(): UseSearchReturn {
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // ── TODO: Implement debounced async search ──────────────────────────────
-  //
-  // 1. DEBOUNCE (300 ms)
-  //    Wait 300 ms after the user stops typing before running the search.
-  //    Cancel any pending timer when a new keystroke arrives.
-  //    Return a cleanup function from useEffect to cancel on unmount.
-  //
-  // 2. ASYNC SEARCH
-  //    Call searchItems(query) after the debounce delay fires.
-  //    - Set isLoading = true before the call.
-  //    - On success: update results, set isLoading = false.
-  //    - On error:   store message in error, set isLoading = false.
-  //    - Empty query: return all items (or clear results -- your choice).
-  //
-  // 3. STALE-RESPONSE PREVENTION
-  //    Rapid typing causes overlapping in-flight requests.
-  //    An older response MUST NOT replace a newer one.
-  //    Example: user types "re" then quickly "react" -- if the "re" response
-  //    arrives after "react", it must be discarded.
-  //    Hint: a cancellation flag or an incrementing request-ID ref both work.
-  //
-  // 4. UNMOUNT CLEANUP
-  //    No pending timers or state updates should run after the hook unmounts.
-  //
-  // You will need useEffect and useRef from React.
-  // ───────────────────────────────────────────────────────────────────────
+  // Tracks the "latest" search request. Any response whose id doesn't
+  // match this when it resolves is stale and gets discarded.
+  const requestIdRef = useRef(0)
+
+  useEffect(() => {
+    let isMounted = true
+
+    // Debounce: wait 300ms after the user stops typing.
+    const timerId = setTimeout(() => {
+      // Bump the request id — this becomes "the current request"
+      const currentRequestId = ++requestIdRef.current
+
+      setIsLoading(true)
+      setError(null)
+
+      searchItems(query)
+        .then(data => {
+          // Ignore if unmounted, or if a newer request has since started
+          if (!isMounted || currentRequestId !== requestIdRef.current) return
+          setResults(data)
+          setIsLoading(false)
+        })
+        .catch(err => {
+          if (!isMounted || currentRequestId !== requestIdRef.current) return
+          setError(err instanceof Error ? err.message : 'Something went wrong')
+          setIsLoading(false)
+        })
+    }, 300)
+
+    // Cleanup: cancel the pending debounce timer if query changes again
+    // or the component unmounts.
+    return () => {
+      isMounted = false
+      clearTimeout(timerId)
+    }
+  }, [query])
 
   return { query, setQuery, results, isLoading, error }
 }
